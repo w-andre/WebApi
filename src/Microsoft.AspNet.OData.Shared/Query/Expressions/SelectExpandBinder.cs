@@ -23,7 +23,7 @@ namespace Microsoft.AspNet.OData.Query.Expressions
     /// </summary>
     [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling",
         Justification = "Class coupling acceptable.")]
-    internal class SelectExpandBinder
+    internal partial class SelectExpandBinder
     {
         private SelectExpandQueryOption _selectExpandQuery;
         private ODataQueryContext _context;
@@ -348,7 +348,6 @@ namespace Microsoft.AspNet.OData.Query.Expressions
                 ISet<IEdmStructuralProperty> autoSelectedProperties;
 
                 ISet<IEdmStructuralProperty> propertiesToInclude = GetPropertiesToIncludeInQuery(selectExpandClause, entityType, navigationSource, _model, out autoSelectedProperties);
-                bool isSelectingOpenTypeSegments = GetSelectsOpenTypeSegments(selectExpandClause, entityType);
 
                 if (propertiesToExpand.Count > 0 || propertiesToInclude.Count > 0 || autoSelectedProperties.Count > 0)
                 {
@@ -356,7 +355,7 @@ namespace Microsoft.AspNet.OData.Query.Expressions
                     Contract.Assert(wrapperProperty != null);
 
                     Expression propertyContainerCreation =
-                        BuildPropertyContainer(entityType, source, propertiesToExpand, propertiesToInclude, autoSelectedProperties, isSelectingOpenTypeSegments);
+                        BuildPropertyContainer(entityType, source, propertiesToExpand, propertiesToInclude, autoSelectedProperties, selectExpandClause);
 
                     wrapperTypeMemberAssignments.Add(Expression.Bind(wrapperProperty, propertyContainerCreation));
                     isContainerPropertySet = true;
@@ -422,104 +421,6 @@ namespace Microsoft.AspNet.OData.Query.Expressions
             {
                 return countExpression;
             }
-        }
-
-        [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Class coupling acceptable")]
-        private Expression BuildPropertyContainer(IEdmEntityType elementType, Expression source,
-            Dictionary<IEdmNavigationProperty, ExpandedNavigationSelectItem> propertiesToExpand,
-            ISet<IEdmStructuralProperty> propertiesToInclude, ISet<IEdmStructuralProperty> autoSelectedProperties, bool isSelectingOpenTypeSegments)
-        {
-            IList<NamedPropertyExpression> includedProperties = new List<NamedPropertyExpression>();
-
-            foreach (KeyValuePair<IEdmNavigationProperty, ExpandedNavigationSelectItem> kvp in propertiesToExpand)
-            {
-                IEdmNavigationProperty propertyToExpand = kvp.Key;
-                ExpandedNavigationSelectItem expandItem = kvp.Value;
-                SelectExpandClause projection = expandItem.SelectAndExpand;
-
-                ModelBoundQuerySettings querySettings = EdmLibHelpers.GetModelBoundQuerySettings(propertyToExpand,
-                    propertyToExpand.ToEntityType(),
-                    _context.Model);
-
-                Expression propertyName = CreatePropertyNameExpression(elementType, propertyToExpand, source);
-                Expression propertyValue = CreatePropertyValueExpressionWithFilter(elementType, propertyToExpand, source,
-                    expandItem.FilterOption);
-                Expression nullCheck = GetNullCheckExpression(propertyToExpand, propertyValue, projection);
-
-                Expression countExpression = CreateTotalCountExpression(propertyValue, expandItem);
-
-                // projection can be null if the expanded navigation property is not further projected or expanded.
-                if (projection != null)
-                {
-                    int? modelBoundPageSize = querySettings == null ? null : querySettings.PageSize;
-                    propertyValue = ProjectAsWrapper(propertyValue, projection, propertyToExpand.ToEntityType(), expandItem.NavigationSource, expandItem, modelBoundPageSize);
-                }
-
-                NamedPropertyExpression propertyExpression = new NamedPropertyExpression(propertyName, propertyValue);
-                if (projection != null)
-                {
-                    if (!propertyToExpand.Type.IsCollection())
-                    {
-                        propertyExpression.NullCheck = nullCheck;
-                    }
-                    else if (_settings.PageSize.HasValue)
-                    {
-                        propertyExpression.PageSize = _settings.PageSize.Value;
-                    }
-                    else
-                    {
-                        if (querySettings != null && querySettings.PageSize.HasValue)
-                        {
-                            propertyExpression.PageSize = querySettings.PageSize.Value;
-                        }
-                    }
-
-                    propertyExpression.TotalCount = countExpression;
-                    propertyExpression.CountOption = expandItem.CountOption;
-                }
-
-                includedProperties.Add(propertyExpression);
-            }
-
-            foreach (IEdmStructuralProperty propertyToInclude in propertiesToInclude)
-            {
-                Expression propertyName = CreatePropertyNameExpression(elementType, propertyToInclude, source);
-                Expression propertyValue = CreatePropertyValueExpression(elementType, propertyToInclude, source);
-                includedProperties.Add(new NamedPropertyExpression(propertyName, propertyValue));
-            }
-
-            foreach (IEdmStructuralProperty propertyToInclude in autoSelectedProperties)
-            {
-                Expression propertyName = CreatePropertyNameExpression(elementType, propertyToInclude, source);
-                Expression propertyValue = CreatePropertyValueExpression(elementType, propertyToInclude, source);
-                includedProperties.Add(new NamedPropertyExpression(propertyName, propertyValue) { AutoSelected = true });
-            }
-
-            if (isSelectingOpenTypeSegments)
-            {
-                var dynamicPropertyDictionary = EdmLibHelpers.GetDynamicPropertyDictionary(elementType, _model);
-
-                Expression propertyName = Expression.Constant(dynamicPropertyDictionary.Name);
-                Expression propertyValue = Expression.Property(source, dynamicPropertyDictionary.Name);
-                Expression nullablePropertyValue = ExpressionHelpers.ToNullable(propertyValue);
-                if (_settings.HandleNullPropagation == HandleNullPropagationOption.True)
-                {
-                    // source == null ? null : propertyValue
-                    propertyValue = Expression.Condition(
-                        test: Expression.Equal(source, Expression.Constant(value: null)),
-                        ifTrue: Expression.Constant(value: null, type: TypeHelper.ToNullable(propertyValue.Type)),
-                        ifFalse: nullablePropertyValue);
-                }
-                else
-                {
-                    propertyValue = nullablePropertyValue;
-                }
-
-                includedProperties.Add(new NamedPropertyExpression(propertyName, propertyValue));
-            }
-
-            // create a property container that holds all these property names and values.
-            return PropertyContainer.CreatePropertyContainer(includedProperties);
         }
 
         private Expression AddOrderByQueryForSource(Expression source, OrderByClause orderbyClause, Type elementType)

@@ -26,7 +26,7 @@ namespace Microsoft.AspNet.OData.Query.Expressions
     /// an <see cref="Expression"/> and applies it to an <see cref="IQueryable"/>.
     /// </summary>
     [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Relies on many ODataLib classes.")]
-    public class FilterBinder : ExpressionBinderBase
+    public partial class FilterBinder : ExpressionBinderBase
     {
         private const string ODataItParameterName = "$it";
 
@@ -203,45 +203,7 @@ namespace Microsoft.AspNet.OData.Query.Expressions
             }
         }
 
-        /// <summary>
-        /// Binds a <see cref="SingleValueOpenPropertyAccessNode"/> to create a LINQ <see cref="Expression"/> that
-        /// represents the semantics of the <see cref="SingleValueOpenPropertyAccessNode"/>.
-        /// </summary>
-        /// <param name="openNode">The node to bind.</param>
-        /// <returns>The LINQ <see cref="Expression"/> created.</returns>
-        public virtual Expression BindDynamicPropertyAccessQueryNode(SingleValueOpenPropertyAccessNode openNode)
-        {
-            if (EdmLibHelpers.IsDynamicTypeWrapper(_filterType))
-            {
-                return GetFlattenedPropertyExpression(openNode.Name) ?? Expression.Property(Bind(openNode.Source), openNode.Name);
-            }
-            PropertyInfo prop = GetDynamicPropertyContainer(openNode);
-
-            var propertyAccessExpression = BindPropertyAccessExpression(openNode, prop);
-            var readDictionaryIndexerExpression = Expression.Property(propertyAccessExpression,
-                DictionaryStringObjectIndexerName, Expression.Constant(openNode.Name));
-            var containsKeyExpression = Expression.Call(propertyAccessExpression,
-                propertyAccessExpression.Type.GetMethod("ContainsKey"), Expression.Constant(openNode.Name));
-            var nullExpression = Expression.Constant(null);
-
-            if (QuerySettings.HandleNullPropagation == HandleNullPropagationOption.True)
-            {
-                var dynamicDictIsNotNull = Expression.NotEqual(propertyAccessExpression, Expression.Constant(null));
-                var dynamicDictIsNotNullAndContainsKey = Expression.AndAlso(dynamicDictIsNotNull, containsKeyExpression);
-                return Expression.Condition(
-                    dynamicDictIsNotNullAndContainsKey,
-                    readDictionaryIndexerExpression,
-                    nullExpression);
-            }
-            else
-            {
-                return Expression.Condition(
-                    containsKeyExpression,
-                    readDictionaryIndexerExpression,
-                    nullExpression);
-            }
-        }
-
+        
         private Expression BindPropertyAccessExpression(SingleValueOpenPropertyAccessNode openNode, PropertyInfo prop)
         {
             var source = Bind(openNode.Source);
